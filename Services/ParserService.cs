@@ -97,7 +97,7 @@ public sealed class ParserService
 
     private static IEnumerable<string> SplitLines(string input)
     {
-        return input.Split(new[] { '\r', '\n' }, 
+        return input.Split(Environment.NewLine, 
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
