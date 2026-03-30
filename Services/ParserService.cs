@@ -97,8 +97,8 @@ public sealed class ParserService
 
     private static IEnumerable<string> SplitLines(string input)
     {
-        return input.Split(Environment.NewLine, 
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return input.Split((char[])new[] { '\r', '\n' },
+            StringSplitOptions.RemoveEmptyEntries);
     }
 
     private static bool TryParseDouble(string input, out double value)
