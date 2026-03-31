@@ -91,3 +91,4 @@ D:\MyProjects\ZayaDesertRequestCreatorBot\temp_build_verify\Telegram.Bot.dll
 D:\MyProjects\ZayaDesertRequestCreatorBot\temp_build_verify\runtimes\win\lib\net8.0\System.Diagnostics.EventLog.Messages.dll
 D:\MyProjects\ZayaDesertRequestCreatorBot\temp_build_verify\runtimes\win\lib\net8.0\System.Diagnostics.EventLog.dll
 D:\MyProjects\ZayaDesertRequestCreatorBot\temp_build_verify\runtimes\browser\lib\net8.0\System.Text.Encodings.Web.dll
+D:\MyProjects\ZayaDesertRequestCreatorBot\obj\Debug\net8.0\ZayaDesertRequestCreatorBot.sourcelink.json
