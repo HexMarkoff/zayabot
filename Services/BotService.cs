@@ -62,8 +62,7 @@ public sealed class BotService
         {
             new BotCommand { Command = "start", Description = "Запуск бота" },
             new BotCommand { Command = "desserts", Description = "Список десертов" },
-            new BotCommand { Command = "status", Description = "Сделать заявку" },
-            new BotCommand { Command = "admin", Description = "Админ-панель" }
+            new BotCommand { Command = "status", Description = "Сделать заявку" }
         };
 
         await _botClient.SetMyCommands(commands);
