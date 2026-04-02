@@ -15,7 +15,8 @@ public enum Step
     BaseSales = 2,
     WeekendMultiplier = 3,
     HolidayMultiplier = 4,
-    SafetyStock = 5
+    SafetyStock = 5,
+    IsCryo = 6
 }
 
 public sealed class UserState

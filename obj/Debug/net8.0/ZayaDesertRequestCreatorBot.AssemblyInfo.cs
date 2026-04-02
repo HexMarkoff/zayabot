@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ZayaDesertRequestCreatorBot")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+302df18d36667cdfcdca68a2a8736851864d91c8")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5394f68b0dd6be226b4834cd1fe0cd9f4419ad91")]
 [assembly: System.Reflection.AssemblyProductAttribute("ZayaDesertRequestCreatorBot")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ZayaDesertRequestCreatorBot")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

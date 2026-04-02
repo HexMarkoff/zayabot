@@ -12,11 +12,19 @@ namespace ZayaDesertRequestCreatorBot.Services;
 
 public sealed class BotService
 {
+    private const string CbAdminStats = "admin_stats";
+    private const string CbAdminUsers = "admin_users";
+    private const string CbAdminLast = "admin_last";
+    private const string CbAdminBack = "admin_back";
+
+    private const int TelegramMaxMessageLength = 4090;
+
     private readonly TelegramBotClient _botClient;
     private readonly DessertService _dessertService;
     private readonly ParserService _parserService;
     private readonly UserStateService _userStateService;
     private readonly StepHandler _stepHandler;
+    private readonly LogService _logService;
     private readonly ILogger<BotService> _logger;
     private readonly ConcurrentDictionary<long, UserSession> _sessions = new();
 
@@ -26,6 +34,7 @@ public sealed class BotService
         ParserService parserService,
         UserStateService userStateService,
         StepHandler stepHandler,
+        LogService logService,
         ILogger<BotService> logger)
     {
         _botClient = botClient;
@@ -33,6 +42,7 @@ public sealed class BotService
         _parserService = parserService;
         _userStateService = userStateService;
         _stepHandler = stepHandler;
+        _logService = logService;
         _logger = logger;
     }
 
@@ -52,7 +62,8 @@ public sealed class BotService
         {
             new BotCommand { Command = "start", Description = "Запуск бота" },
             new BotCommand { Command = "desserts", Description = "Список десертов" },
-            new BotCommand { Command = "status", Description = "Сделать заявку" }
+            new BotCommand { Command = "status", Description = "Сделать заявку" },
+            new BotCommand { Command = "admin", Description = "Админ-панель" }
         };
 
         await _botClient.SetMyCommands(commands);
@@ -108,7 +119,7 @@ public sealed class BotService
 
         if (userState.CurrentAction != DessertAction.None)
         {
-            await _stepHandler.HandleInputAsync(chatId, rawText, cancellationToken);
+            await _stepHandler.HandleInputAsync(chatId, rawText, message.From, cancellationToken);
             return;
         }
 
@@ -125,14 +136,31 @@ public sealed class BotService
                     "/desserts — управление десертами\n" +
                     "/status — выбрать тип дня и ввести остатки",
                     cancellationToken: cancellationToken);
+                await TryLogAsync(message.From, "Start", cancellationToken);
                 return;
 
             case "/desserts":
+                await TryLogAsync(message.From, "DessertsEdit", cancellationToken);
                 await ShowDessertsMenuAsync(chatId, cancellationToken);
                 return;
 
             case "/status":
+                await TryLogAsync(message.From, "Status", cancellationToken);
                 await AskDayTypeAsync(chatId, cancellationToken);
+                return;
+
+            case "/admin":
+                if (!AdminHelper.IsAdmin(message.From))
+                {
+                    await _botClient.SendMessage(chatId, "Нет доступа ❌", cancellationToken: cancellationToken);
+                    return;
+                }
+
+                await _botClient.SendMessage(
+                    chatId,
+                    "Админ-панель",
+                    replyMarkup: BuildAdminRootKeyboard(),
+                    cancellationToken: cancellationToken);
                 return;
         }
 
@@ -169,6 +197,7 @@ public sealed class BotService
                 response,
                 replyMarkup: keyboard,
                 cancellationToken: cancellationToken);
+            await TryLogAsync(message.From, "CreateRequest", cancellationToken);
             return;
         }
     }
@@ -181,19 +210,86 @@ public sealed class BotService
             return;
         }
 
-        var session = _sessions.GetOrAdd(chatId.Value, _ => new UserSession());
         var data = callbackQuery.Data ?? string.Empty;
+
+        if (data.StartsWith("admin_", StringComparison.Ordinal))
+        {
+            if (!AdminHelper.IsAdmin(callbackQuery.From))
+            {
+                await _botClient.AnswerCallbackQuery(
+                    callbackQuery.Id,
+                    text: "Нет доступа ❌",
+                    showAlert: true,
+                    cancellationToken: cancellationToken);
+                return;
+            }
+
+            try
+            {
+                await HandleAdminCallbackAsync(callbackQuery, cancellationToken);
+            }
+            catch (ApiRequestException ex)
+            {
+                _logger.LogWarning(ex, "Admin callback Telegram API error");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Admin callback failed");
+            }
+
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, cancellationToken: cancellationToken);
+            return;
+        }
+
+        var session = _sessions.GetOrAdd(chatId.Value, _ => new UserSession());
+        var from = callbackQuery.From;
 
         switch (data)
         {
+            case "dessert_cancel":
+            {
+                var cancelled = await _stepHandler.TryCancelDessertWizardAsync(chatId.Value, cancellationToken);
+                if (cancelled)
+                {
+                    await _botClient.AnswerCallbackQuery(callbackQuery.Id, cancellationToken: cancellationToken);
+                }
+                else
+                {
+                    await _botClient.AnswerCallbackQuery(
+                        callbackQuery.Id,
+                        text: "Сейчас нечего отменять.",
+                        showAlert: true,
+                        cancellationToken: cancellationToken);
+                }
+
+                return;
+            }
+            case "cryo_yes":
+            {
+                var ok = await _stepHandler.TryApplyCryoCallbackAsync(chatId.Value, true, from, cancellationToken);
+                await AnswerCryoOrCancelCallbackAsync(callbackQuery, ok, cancellationToken);
+                return;
+            }
+            case "cryo_no":
+            {
+                var ok = await _stepHandler.TryApplyCryoCallbackAsync(chatId.Value, false, from, cancellationToken);
+                await AnswerCryoOrCancelCallbackAsync(callbackQuery, ok, cancellationToken);
+                return;
+            }
+            case "cryo_keep":
+            {
+                var ok = await _stepHandler.TryApplyCryoCallbackAsync(chatId.Value, null, from, cancellationToken);
+                await AnswerCryoOrCancelCallbackAsync(callbackQuery, ok, cancellationToken);
+                return;
+            }
             case "dessert_add":
-                await _stepHandler.StartAddAsync(chatId.Value, cancellationToken);
+                await _stepHandler.StartAddAsync(chatId.Value, from, cancellationToken);
                 break;
             case "dessert_edit":
-                await _stepHandler.StartEditAsync(chatId.Value, cancellationToken);
+                await _stepHandler.StartEditAsync(chatId.Value, from, cancellationToken);
                 break;
             case "dessert_delete":
-                await _stepHandler.StartDeleteAsync(chatId.Value, cancellationToken);
+                await _stepHandler.StartDeleteAsync(chatId.Value, from, cancellationToken);
                 break;
             case "day_weekday":
                 await SetDayAndAskNitrogenAsync(chatId.Value, session, DayType.Weekday, cancellationToken);
@@ -216,6 +312,166 @@ public sealed class BotService
         }
 
         await _botClient.AnswerCallbackQuery(callbackQuery.Id, cancellationToken: cancellationToken);
+    }
+
+    private async Task AnswerCryoOrCancelCallbackAsync(
+        CallbackQuery callbackQuery,
+        bool success,
+        CancellationToken cancellationToken)
+    {
+        if (success)
+        {
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, cancellationToken: cancellationToken);
+        }
+        else
+        {
+            await _botClient.AnswerCallbackQuery(
+                callbackQuery.Id,
+                text: "Действие недоступно.",
+                showAlert: true,
+                cancellationToken: cancellationToken);
+        }
+    }
+
+    private async Task HandleAdminCallbackAsync(CallbackQuery query, CancellationToken cancellationToken)
+    {
+        var message = query.Message;
+        if (message is null)
+        {
+            return;
+        }
+
+        var chatId = message.Chat.Id;
+        var messageId = message.MessageId;
+        var data = query.Data ?? string.Empty;
+
+        switch (data)
+        {
+            case CbAdminBack:
+                await _botClient.EditMessageText(
+                    chatId,
+                    messageId,
+                    "Админ-панель",
+                    replyMarkup: BuildAdminRootKeyboard(),
+                    cancellationToken: cancellationToken);
+                return;
+
+            case CbAdminStats:
+            {
+                var all = await _logService.GetAllLogs(cancellationToken);
+                var usersCount = (await _logService.GetUniqueUsers(cancellationToken)).Count;
+                var requests = all.Count(a => a.Action == "CreateRequest");
+                var text =
+                    "Статистика:\n" +
+                    $"Пользователей: {usersCount}\n" +
+                    $"Действий: {all.Count}\n" +
+                    $"Заявок: {requests}";
+                await _botClient.EditMessageText(
+                    chatId,
+                    messageId,
+                    text,
+                    replyMarkup: BuildAdminBackKeyboard(),
+                    cancellationToken: cancellationToken);
+                return;
+            }
+
+            case CbAdminUsers:
+            {
+                var users = await _logService.GetUniqueUsers(cancellationToken);
+                var lines = users.Count == 0
+                    ? "Пока нет пользователей в логах."
+                    : string.Join(
+                        '\n',
+                        users.Select(u =>
+                        {
+                            var name = string.IsNullOrWhiteSpace(u.Username) ? "—" : u.Username;
+                            return $"{name} — {u.UserId}";
+                        }));
+                var text = TruncateForTelegram("Пользователи:\n" + lines);
+                await _botClient.EditMessageText(
+                    chatId,
+                    messageId,
+                    text,
+                    replyMarkup: BuildAdminBackKeyboard(),
+                    cancellationToken: cancellationToken);
+                return;
+            }
+
+            case CbAdminLast:
+            {
+                var last = await _logService.GetLastLogs(10, cancellationToken);
+                var lines = last.Count == 0
+                    ? "Записей пока нет."
+                    : string.Join(
+                        '\n',
+                        last.Select(a =>
+                        {
+                            var name = string.IsNullOrWhiteSpace(a.Username) ? "—" : a.Username;
+                            var time = a.Timestamp.ToLocalTime().ToString("HH:mm");
+                            return $"{name} — {a.Action} — {time}";
+                        }));
+                var text = TruncateForTelegram("Последние действия:\n" + lines);
+                await _botClient.EditMessageText(
+                    chatId,
+                    messageId,
+                    text,
+                    replyMarkup: BuildAdminBackKeyboard(),
+                    cancellationToken: cancellationToken);
+                return;
+            }
+        }
+    }
+
+    private static InlineKeyboardMarkup BuildAdminRootKeyboard()
+    {
+        return new InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton.WithCallbackData("📊 Статистика", CbAdminStats)],
+            [InlineKeyboardButton.WithCallbackData("👥 Пользователи", CbAdminUsers)],
+            [InlineKeyboardButton.WithCallbackData("📜 Последние действия", CbAdminLast)]
+        ]);
+    }
+
+    private static InlineKeyboardMarkup BuildAdminBackKeyboard()
+    {
+        return new InlineKeyboardMarkup(new[]
+        {
+            new[] { InlineKeyboardButton.WithCallbackData("◀️ Назад", CbAdminBack) }
+        });
+    }
+
+    private static string TruncateForTelegram(string text)
+    {
+        if (text.Length <= TelegramMaxMessageLength)
+        {
+            return text;
+        }
+
+        return text[..TelegramMaxMessageLength] + "…";
+    }
+
+    private async Task TryLogAsync(User? user, string action, CancellationToken cancellationToken)
+    {
+        if (user is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _logService.AddLog(
+                new UserAction
+                {
+                    UserId = user.Id,
+                    Username = user.Username ?? string.Empty,
+                    Action = action
+                },
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Не удалось записать действие в лог: {Action}", action);
+        }
     }
 
     private async Task AskDayTypeAsync(long chatId, CancellationToken cancellationToken)
@@ -283,7 +539,8 @@ public sealed class BotService
                 $"В день: {d.BaseSales}\n" +
                 $"Выходной: {d.WeekendMultiplier}\n" +
                 $"Праздник: {d.HolidayMultiplier}\n" +
-                $"Доп: {d.SafetyStock}"));
+                $"Доп: {d.SafetyStock}\n" +
+                $"Крио: {(d.IsCryo ? "да" : "нет")}"));
 
         var keyboard = new InlineKeyboardMarkup([
             [

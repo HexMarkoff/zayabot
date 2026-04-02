@@ -17,9 +17,11 @@ var host = Host.CreateDefaultBuilder(args)
         }
 
         var storagePath = Path.Combine(context.HostingEnvironment.ContentRootPath, "data", "desserts.json");
+        var logsPath = Path.Combine(context.HostingEnvironment.ContentRootPath, "logs.json");
 
         services.AddSingleton(new TelegramBotClient(token));
         services.AddSingleton(new StorageService(storagePath));
+        services.AddSingleton(new LogService(logsPath));
         services.AddSingleton<DessertService>();
         services.AddSingleton<ParserService>();
         services.AddSingleton<UserStateService>();
